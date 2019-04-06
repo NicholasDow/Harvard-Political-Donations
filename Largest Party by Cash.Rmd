@@ -1,0 +1,103 @@
+---
+title: "Final Cash"
+author: "Nicholas Dow"
+date: "April 6, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE, cache = TRUE}
+
+#Loads all the nessiary packages to data manipulation, cleaning and organization for the rest of the pset.
+
+library(readxl)
+library(tidyverse)
+library(gt)
+library(fs)
+library(janitor)
+library(stringr)
+
+# We download the file and interpret the data, which happens to have a delimiter and headers
+# Then we take the variables that we are interested in and assign them a new name
+
+download.file( url = "https://www.fec.gov/files/bulk-downloads/2006/weball06.zip", 
+               destfile = "data_2006.zip", mode = "wb")
+data_2006 <- read_delim(delim = "|", 
+                        file = "data_2006.zip", 
+                        col_names = FALSE) %>% 
+  clean_names() %>% 
+  transmute(cand_id = x1, cand_name = x2, party = x5, cash = x11, cand_state = x19)
+
+#We delete the file after it is assigned to var
+
+file_delete("data_2006.zip")
+
+# We download a file and interpret in the same way that we did above
+
+download.file( url = "https://www.fec.gov/files/bulk-downloads/2006/cm06.zip",
+               destfile = "com_data_2006.zip", mode = "wb")
+com_data_2006 <- read_delim(delim = "|", 
+                            file = "com_data_2006.zip", 
+                            col_names = FALSE) %>% 
+  clean_names() %>% 
+  transmute(cmte_id = x1, cmte_party = x11, cand_id = x15)
+
+# We delete the file once it has been assigned to var
+
+file_delete("com_data_2006.zip")
+
+# We download the file as we have above, though this time we have many NA's so we increase the range with which we detect
+# those files with guess max, everything else is like above
+download.file(url = "https://www.fec.gov/files/bulk-downloads/2006/indiv06.zip", destfile = "indv06.zip", write = "wb")
+contributions <- read_delim(delim = "|", 
+                            file = "indv06.zip", 
+                            col_names = FALSE,
+                            escape_double = FALSE,
+                            guess_max = 10000) %>% 
+  transmute(cmte_id = X1, date = X14, amount = X15, employer = X12, occupation = X13)
+
+# We delete for the same reasons above
+
+file_delete("indv06.zip")
+```
+
+```{r echo=FALSE, message=FALSE, cache = TRUE}
+data_2006 %>% 
+  
+  #To make sure we do not group parties diff if they have diff capitalization, we convert all to lowwercase
+  
+  mutate(party = str_to_lower(party)) %>%
+  group_by(party) %>% 
+  
+  # We sum up the total cash by party, and organize into a list
+  
+  summarise(cash = sum(cash)) %>% 
+  arrange(desc(cash)) %>% 
+  
+  #We make some of the names pretty with fct collapse
+  
+  mutate(party = fct_collapse(party, "Democrats" = "dem", 
+                                       "Republicans" = "rep", 
+                                       "Independent" = "ind" ,
+                                       "Minnesota Democratic–Farmer–Labor Party" = "dfl",
+                                       "Libertarian" = "lib")) %>% 
+  
+  # We take the 5 largest parties and pipe them into a table, where we format appropriately to convey the maximum amount of information
+  
+  slice(1:5) %>% 
+  gt() %>% 
+  tab_header(
+    title = "5 Largest Parties by Final Cash in 2006"
+  ) %>% 
+  
+  # convert cash to usd format 
+  
+  fmt_currency(columns = vars(cash), currency = "USD") %>% 
+  
+  # Make names better
+  
+  cols_label(
+    party = "Political Party",
+    cash = "Total Cash"
+  ) %>% 
+  tab_source_note(source_note = "Source: Federal Election Commission of the United States of America")
+```

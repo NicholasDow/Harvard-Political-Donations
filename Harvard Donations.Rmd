@@ -1,0 +1,132 @@
+---
+title: "Harvard Donations"
+author: "Nicholas Dow"
+date: "April 6, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE, cache = TRUE}
+
+#Loads all the nessiary packages to data manipulation, cleaning and organization for the rest of the pset.
+
+library(readxl)
+library(tidyverse)
+library(gt)
+library(fs)
+library(janitor)
+library(stringr)
+
+# We download the file and interpret the data, which happens to have a delimiter and headers
+# Then we take the variables that we are interested in and assign them a new name
+
+download.file( url = "https://www.fec.gov/files/bulk-downloads/2006/weball06.zip", 
+               destfile = "data_2006.zip", mode = "wb")
+data_2006 <- read_delim(delim = "|", 
+                        file = "data_2006.zip", 
+                        col_names = FALSE) %>% 
+  clean_names() %>% 
+  transmute(cand_id = x1, cand_name = x2, party = x5, cash = x11, cand_state = x19)
+
+#We delete the file after it is assigned to var
+
+file_delete("data_2006.zip")
+
+# We download a file and interpret in the same way that we did above
+
+download.file( url = "https://www.fec.gov/files/bulk-downloads/2006/cm06.zip",
+               destfile = "com_data_2006.zip", mode = "wb")
+com_data_2006 <- read_delim(delim = "|", 
+                            file = "com_data_2006.zip", 
+                            col_names = FALSE) %>% 
+  clean_names() %>% 
+  transmute(cmte_id = x1, cmte_party = x11, cand_id = x15)
+
+# We delete the file once it has been assigned to var
+
+file_delete("com_data_2006.zip")
+
+# We download the file as we have above, though this time we have many NA's so we increase the range with which we detect
+# those files with guess max, everything else is like above
+download.file(url = "https://www.fec.gov/files/bulk-downloads/2006/indiv06.zip", destfile = "indv06.zip", write = "wb")
+contributions <- read_delim(delim = "|", 
+                            file = "indv06.zip", 
+                            col_names = FALSE,
+                            escape_double = FALSE,
+                            guess_max = 10000) %>% 
+  transmute(cmte_id = X1, date = X14, amount = X15, employer = X12, occupation = X13)
+
+# We delete for the same reasons above
+
+file_delete("indv06.zip")
+```
+
+```{r echo=FALSE, message=FALSE}
+
+
+t1 = inner_join(x = com_data_2006, y = data_2006, by = "cand_id")
+
+# We get the party, committee id, and cand, to figure out where individual contributions go
+
+t2 = inner_join(t1, contributions, by = "cmte_id") %>% 
+  
+  # We filter for the specific person we are looking for in the donation data, exclude na party values
+  
+  filter(employer == "HARVARD UNIVERSITY") %>% 
+  filter(str_detect(occupation, "PROFESSOR")) %>% 
+  filter(!is.na(party)) %>% 
+  
+  # We convert the numbers we are given to a date, then split them into quarters
+  
+  mutate(date = parse_date(date, format = "%m%d%Y")) %>% 
+  mutate(quarter = cut(date, breaks = "quarter")) %>%
+  
+  # We summarize the party and quarter contributions into a value and rearrange those values. Na = 0
+  group_by(quarter, party) %>% 
+  summarise(n = sum(amount > 0)) %>% 
+  spread(key = party, value = n, fill = 0) %>% 
+  
+  # Ungroup to make interpretable
+  
+  ungroup() %>% 
+  
+  # We format a table properly
+  
+  tab_source_note("Source: Federal Election Commission of the United of America") %>% 
+  gt() %>% 
+  cols_label(quarter = "Quarter Years",
+              DEM = "Democrats",
+             REP = "Republican")
+t2
+
+# We take the previous data set and search for contributions made by harvard professors
+
+t3 = contributions %>% 
+  filter(employer == "HARVARD UNIVERSITY") %>% 
+  
+  # We convert to date so that we can make this out x axis, without clutter
+  
+  mutate(date = parse_date(date, format = "%m%d%Y")) %>% 
+  
+  # We join party, cand id with committee. We use left join to get the # that was specified by the pset
+  left_join(t1, by = "cmte_id")
+
+# We write a rds file to be used by another file
+
+write_rds(t3, "t3.rds")
+
+read_rds("t3.rds") %>% 
+  
+  # We set x to the date as specified, then make a jitter plot where we can commuicate contribution by size and party by row.
+  
+  ggplot(aes(x = date, y = party, size = amount, color = party)) +
+  geom_jitter(alpha = 0.5, show.legend = FALSE) +
+  
+  # We label everything properly, and expand the names of our y labels through scale y discrete
+  
+  labs(title = "Donations from Harvard Faculty 2005 -2006",
+       caption = "Source : Federal Elections") +
+  xlab("Date") +
+  ylab("Party") +
+  scale_y_discrete(labels = c(DEM = "Democrats", REP = "Republicans", IND = "Independent"))
+
+```
